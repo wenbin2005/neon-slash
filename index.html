@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>NeonSlash</title>
+    <!-- 內嵌圖示：瀏覽器不再向站台根目錄要 /favicon.ico（原本每次載入都 404）。 -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a12'/%3E%3Cpath%20d='M9.5%2023.5%2022.5%208.5'%20stroke='%2351dbe3'%20stroke-width='4'%20stroke-linecap='round'/%3E%3Cpath%20d='M7%2015.5h7'%20stroke='%2351dbe3'%20stroke-opacity='.45'%20stroke-width='2'%20stroke-linecap='round'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="TemplateData/style.css">
+    <script>
+      // 直向提示：本分頁按過「直向繼續玩」就在第一次繪製前加上 portrait-ok，提示層不會閃一下。
+      const PORTRAIT_OK_KEY = "neonslash.portraitContinue";
+      try {
+        if (sessionStorage.getItem(PORTRAIT_OK_KEY) === "1") document.documentElement.classList.add("portrait-ok");
+      } catch (err) {
+        // 讀不到 sessionStorage（隱私模式或停用網站資料）：照常顯示提示層。
+      }
+    </script>
+  </head>
+  <body>
+    <p id="portrait-hint">橫向遊玩更清楚 · 左側拖動走位，右側點擊衝刺斬擊</p>
+    <main id="unity-container">
+      <div id="unity-fullscreen-container">
+        <canvas id="unity-canvas" width="1280" height="720" tabindex="0" aria-label="霓光連斬遊戲"></canvas>
+        <div id="unity-loading-container" role="status">
+          <p>載入霓光連斬…</p>
+          <div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div>
+        </div>
+        <div id="unity-warning" role="alert"></div>
+      </div>
+      <div id="unity-footer"><span>NeonSlash</span><button id="unity-fullscreen-button" type="button">全螢幕</button></div>
+    </main>
+    <div id="rotate-overlay" role="dialog" aria-modal="true" aria-labelledby="rotate-title" aria-describedby="rotate-desc" tabindex="-1" data-no-forward>
+      <div class="rotate-panel">
+        <svg class="rotate-icon" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="rotate-stroke" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#8ff1f5"></stop>
+              <stop offset="1" stop-color="#3fbfcc"></stop>
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" r="34" fill="rgba(81, 219, 227, 0.07)"></circle>
+          <g class="rotate-arc" fill="none" stroke="#51dbe3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M104.4 48.1 A46 46 0 0 0 71.9 15.6"></path>
+            <path d="M79.96 12.58 L71.9 15.6 L77.37 22.24"></path>
+            <path d="M15.57 71.9 A46 46 0 0 0 48.1 104.43"></path>
+            <path d="M40.05 107.45 L48.1 104.43 L42.64 97.79"></path>
+          </g>
+          <g class="rotate-phone">
+            <rect x="43" y="27" width="34" height="66" rx="8" fill="rgba(81, 219, 227, 0.10)" stroke="url(#rotate-stroke)" stroke-width="3.5"></rect>
+            <rect x="49" y="35" width="22" height="44" rx="3" fill="rgba(81, 219, 227, 0.22)"></rect>
+            <circle cx="60" cy="86" r="2.2" fill="#51dbe3"></circle>
+          </g>
+        </svg>
+        <h1 id="rotate-title">請把手機轉成橫向</h1>
+        <p id="rotate-desc"><span>橫向畫面最大：</span><span>左手按住拖動走位，</span><span>右手點擊衝刺斬擊。</span></p>
+        <button id="rotate-continue" type="button">直向繼續玩</button>
+      </div>
+    </div>
+    <script>
+      // ?touchdebug=1 診斷模式（T5）。網址沒帶這個參數時，這段只做一次網址比對：
+      // 不建立任何 DOM、不掛任何監聽器、不包裝 console，頁面行為和沒有這段時完全相同。
+      // 帶參數時：所有元素 pointer-events:none，監聽器一律 {capture:true, passive:true}，
+      // 不呼叫 preventDefault／stopPropagation／focus，不改 canvas 尺寸、不呼叫 getContext；
+      // 資料只顯示在本機畫面，不送任何網路請求。
+      const touchDebug = /(?:^|[?&])touchdebug=1(?:&|$)/.test(location.search) ? (() => {
+        const t0 = performance.now();
+        const ms = () => Math.round(performance.now() - t0);
+        const listen = (target, type, fn) => target.addEventListener(type, fn, { capture: true, passive: true });
+        const r1 = (v) => Math.round(v);
+        const cut = (text, n) => (text.length > n ? text.slice(0, n - 1) + "…" : text);
+        const qaOn = /(?:^|[?&])qalog=1(?:&|$)/.test(location.search);
+        const ua = navigator.userAgent;
+        const uaKind = [
+          / Line\//i.test(ua) && "LINE",
+          /FBAN|FBAV|FB_IAB/.test(ua) && "FB",
+          /Instagram/.test(ua) && "Instagram",
+          /; wv\)/.test(ua) && "WebView",
+          /iPhone|iPad|iPod/.test(ua) ? "iOS" : (/Android/.test(ua) ? "Android" : "桌機")
+        ].filter(Boolean).join("／");
+        const REACT = /\[NeonSlash\]\[QA\] (state|move|dash|focus|gate) /;
+        const s = {
+          progress: 0, loader: "載入中", ready: null, failed: null, failMsg: "",
+          counts: { canvas: 0, forward: 0, excluded: 0 }, moves: 0, lastMove: "",
+          events: [], qa: [], errs: [], errCount: 0, pending: [], blur: null, focus: null, info: {}
+        };
+        const canvasEl = document.getElementById("unity-canvas");
+        const hintEl = document.getElementById("portrait-hint");
+        const root = document.createElement("div");
+        root.id = "td-root";
+        root.setAttribute("data-no-forward", "");
+        root.setAttribute("aria-hidden", "true");
+        const frame = document.createElement("div");
+        frame.id = "td-frame";
+        const panel = document.createElement("div");
+        panel.id = "td-panel";
+        const pre = (id) => { const el = document.createElement("pre"); el.id = id; panel.appendChild(el); return el; };
+        const sumEl = pre("td-sum");
+        const errEl = pre("td-err");
+        const evEl = pre("td-ev");
+        const qaEl = pre("td-qa");
+        root.append(frame, panel);
+        document.body.appendChild(root);
+
+        let renderQueued = false;
+        let lastRender = -1000;
+        const schedule = () => {
+          if (renderQueued) return;
+          renderQueued = true;
+          const tick = (now) => {
+            if (now - lastRender < 250) { requestAnimationFrame(tick); return; }
+            renderQueued = false;
+            lastRender = now;
+            render();
+          };
+          requestAnimationFrame(tick);
+        };
+
+        // 落點標記先排隊，跟面板一起在節流後的 render 裡建立（最多晚 250 ms，位置用按下當時的座標）。
+        const markers = [];
+        const addMarker = (x, y, kind) => { markers.push({ x, y, kind }); schedule(); };
+        const flushMarkers = () => {
+          for (const m of markers.splice(0)) {
+            const dot = document.createElement("div");
+            dot.className = "td-dot td-" + m.kind;
+            dot.style.transform = "translate(" + (m.x - 12) + "px, " + (m.y - 12) + "px)";
+            root.appendChild(dot);
+            setTimeout(() => dot.remove(), 650);
+          }
+        };
+
+        const describe = (el) => (!el ? "無" : el === window ? "window" : el === document ? "document"
+          : (el.nodeName || "?") + (el.id ? "#" + el.id : ""));
+        const KIND = { canvas: "畫布內", forward: "轉送", excluded: "排除" };
+        const fmtEvent = (e) => {
+          let line = String(e.t).padStart(6) + " " + e.type.replace("touch", "") + " #" + e.id + (e.n ? " ×" + e.n + " 最後" : "") + " (" + e.x + "," + e.y + ")";
+          if (e.kind) line += " " + KIND[e.kind] + (e.reason ? "：" + e.reason : "") + (e.to ? "→(" + r1(e.to.x) + "," + r1(e.to.y) + ")" : "");
+          line += " " + e.target;
+          if (e.reaction) line += " " + e.reaction;
+          return line;
+        };
+
+        const onTouch = (e) => {
+          if (!e.isTrusted) return; // 自己派出的合成事件不算，避免重複計數。
+          for (const t of e.changedTouches) {
+            if (e.type === "touchmove") {
+              s.moves++;
+              s.lastMove = r1(t.clientX) + "," + r1(t.clientY);
+              // 同一指連續的 touchmove 併成一列（次數＋最後座標），免得幾十筆 move 把 start／end 擠出「最後 12 筆」；
+              // 多指同時拖動時往回找到同一指的 move 列為止（中間只隔著其他指的 move 列）。
+              let merged = false;
+              for (let i = s.events.length - 1; i >= 0 && s.events[i].type === "touchmove"; i--) {
+                const row = s.events[i];
+                if (row.id !== t.identifier) continue;
+                row.n++; row.t = ms(); row.x = r1(t.clientX); row.y = r1(t.clientY);
+                merged = true;
+                break;
+              }
+              if (!merged) {
+                s.events.push({ t: ms(), type: e.type, id: t.identifier, x: r1(t.clientX), y: r1(t.clientY), n: 1,
+                  target: describe(t.target), kind: "", reason: "", to: null, reaction: null });
+                if (s.events.length > 40) s.events.shift();
+              }
+              continue;
+            }
+            const row = { t: ms(), at: performance.now(), type: e.type, id: t.identifier, x: r1(t.clientX), y: r1(t.clientY),
+              target: describe(t.target), kind: "", reason: "", to: null, reaction: null };
+            if (e.type === "touchstart") {
+              const c = api.hooks.classify ? api.hooks.classify(t)
+                : { kind: t.target === canvasEl ? "canvas" : "excluded", reason: "轉送未初始化" };
+              row.kind = c.kind;
+              row.reason = c.reason || "";
+              row.to = c.to || null;
+              s.counts[c.kind]++;
+              addMarker(t.clientX, t.clientY, c.kind);
+              if (c.kind !== "excluded") {
+                s.pending.push(row);
+                setTimeout(() => {
+                  const i = s.pending.indexOf(row);
+                  if (i >= 0) { s.pending.splice(i, 1); row.reaction = "→ 無 QA 反應"; schedule(); }
+                }, 1000);
+              }
+            }
+            s.events.push(row);
+            if (s.events.length > 40) s.events.shift();
+          }
+          schedule();
+        };
+        for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"]) listen(window, type, onTouch);
+
+        // 所有 warn／error 都計數；內容只保留最後 200 筆（Unity 若每幀印警告，不能無限累積記憶體），面板顯示總數與最近幾筆。
+        const pushErr = (text) => {
+          s.errCount++;
+          s.errs.push(String(ms()).padStart(6) + " " + cut(text.split("\n")[0], 160));
+          if (s.errs.length > 200) s.errs.shift();
+          schedule();
+        };
+        const onConsole = (level, args) => {
+          const text = args.map((a) => (typeof a === "string" ? a : a instanceof Error ? a.message : String(a))).join(" ");
+          const first = text.split("\n")[0];
+          if (/^\s*\[NeonSlash\]/.test(first)) {
+            s.qa.push(String(ms()).padStart(6) + " " + cut(first.replace(/^\s*\[NeonSlash\]/, "").replace(/｜音效 播放.*$/, ""), 90));
+            if (s.qa.length > 10) s.qa.shift();
+            if (REACT.test(first)) {
+              const now = performance.now();
+              const short = cut(first.replace(/^.*\[QA\] /, ""), 44);
+              for (const row of s.pending.splice(0)) {
+                row.reaction = now - row.at <= 1000 ? "→ 反應 +" + r1(now - row.at) + " ms " + short : "→ 無 QA 反應";
+              }
+            }
+          }
+          if (level === "warn" || level === "error") pushErr("[" + level + "] " + first);
+          schedule();
+        };
+        for (const level of ["log", "info", "warn", "error", "debug"]) {
+          const original = console[level];
+          if (typeof original !== "function") continue;
+          console[level] = function (...args) {
+            const result = original.apply(this, args); // 先呼叫原函式，診斷層只旁聽。
+            try { onConsole(level, args); } catch (err) { /* 診斷層出錯不可影響遊戲 */ }
+            return result;
+          };
+        }
+        listen(window, "error", (e) => {
+          const el = e.target;
+          if (el && el !== window && el.nodeType === 1) pushErr("資源載入失敗 " + describe(el) + " " + (el.src || el.href || ""));
+          else pushErr("window error " + (e.message || "") + " @" + String(e.filename || "").split("/").pop() + ":" + (e.lineno || 0));
+        });
+        listen(window, "unhandledrejection", (e) => {
+          const reason = e.reason;
+          pushErr("unhandledrejection " + (reason && reason.message ? reason.message : String(reason)));
+        });
+        listen(window, "blur", (e) => { if (e.target === window) { s.blur = ms(); schedule(); } });
+        listen(window, "focus", (e) => { if (e.target === window) { s.focus = ms(); schedule(); } });
+        listen(document, "visibilitychange", schedule);
+        listen(window, "resize", schedule);
+        listen(window, "orientationchange", schedule);
+        if (window.visualViewport) listen(window.visualViewport, "resize", schedule);
+        setInterval(schedule, 1000);
+
+        const render = () => {
+          const r = canvasEl.getBoundingClientRect();
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          const portrait = window.matchMedia("(orientation: portrait)").matches;
+          const vv = window.visualViewport;
+          const unity = s.failed !== null ? "失敗 " + s.failed + " ms：" + cut(s.failMsg, 60)
+            : s.ready !== null ? "ready " + s.ready + " ms" : "載入 " + r1(s.progress * 100) + "%";
+          const bars = portrait ? "上 " + r1(r.top) + "／下 " + r1(vh - r.bottom) : "左 " + r1(r.left) + "／右 " + r1(vw - r.right);
+          const forward = typeof s.info.forward === "function" ? s.info.forward() : s.info.forward;
+          const lines = [
+            "NeonSlash 觸控診斷｜版本 " + (s.info.productVersion || "?") + "｜頁面 " + document.lastModified,
+            "Unity " + unity + "｜loader " + s.loader + "｜轉送 " + (forward || "?"),
+            "UA " + uaKind + "｜DPR 視窗 " + (window.devicePixelRatio || 1) + " → 採用 " + (s.info.dpr || window.devicePixelRatio || 1),
+            "視窗 " + vw + "×" + vh + (vv ? "｜visualViewport " + r1(vv.width) + "×" + r1(vv.height) + " ×" + vv.scale.toFixed(2) + " 上移 " + r1(vv.offsetTop) : "")
+              + "｜" + (portrait ? "直向" : "橫向") + (screen.orientation ? " " + screen.orientation.type : ""),
+            "畫布 背後 " + canvasEl.width + "×" + canvasEl.height + "｜rect x" + r1(r.left) + " y" + r1(r.top) + " w" + r1(r.width) + " h" + r1(r.height) + "｜黑邊 " + bars + " px",
+            "焦點 " + (document.hasFocus() ? "有" : "無") + "｜" + document.visibilityState + "｜最後 blur " + (s.blur === null ? "無" : s.blur + " ms")
+              + "｜最後 focus " + (s.focus === null ? "無" : s.focus + " ms"),
+            "touchstart 畫布內 " + s.counts.canvas + "｜轉送 " + s.counts.forward + "｜排除 " + s.counts.excluded + "｜touchmove " + s.moves + (s.lastMove ? "（最後 " + s.lastMove + "）" : "")
+          ];
+          if (!qaOn) lines.push("提醒：網址沒有 qalog=1，遊戲不會印 QA 行，無法判斷觸控有沒有反應。");
+          sumEl.textContent = lines.join("\n");
+          // 事件與 QA 行都是新的在上；橫向面板高度只有 35%，三欄並排（摘要｜錯誤＋事件｜QA 行），一筆一行、超出截斷。
+          evEl.textContent = s.events.slice(-12).reverse().map(fmtEvent).join("\n");
+          qaEl.textContent = s.qa.slice().reverse().join("\n");
+          const errShown = portrait ? 8 : 3;
+          errEl.textContent = !s.errCount ? "" : "警告／錯誤 共 " + s.errCount + " 筆"
+            + (s.errCount > errShown ? "（顯示最近 " + errShown + " 筆）" : "") + "\n" + s.errs.slice(-errShown).reverse().join("\n");
+          frame.style.transform = "translate(" + r.left + "px, " + r.top + "px)";
+          frame.style.width = r.width + "px";
+          frame.style.height = r.height + "px";
+          panel.className = portrait ? "td-portrait" : "td-landscape";
+          // 直向：面板放在 canvas 上方黑區；#portrait-hint 顯示時從它下緣開始，兩者的字不重疊。
+          let top = 0;
+          if (portrait && getComputedStyle(hintEl).display !== "none") {
+            const hr = hintEl.getBoundingClientRect();
+            if (hr.height > 0) top = Math.ceil(hr.bottom) + 2;
+          }
+          panel.style.top = top + "px";
+          panel.style.maxHeight = portrait ? Math.max(48, r.top - top - 4) + "px" : "";
+          flushMarkers();
+        };
+
+        const api = {
+          hooks: { classify: null },
+          setInfo(info) { Object.assign(s.info, info); schedule(); },
+          loader(status) { s.loader = status === "loaded" ? "已載入 " + ms() + " ms" : "載入失敗 " + ms() + " ms"; schedule(); },
+          progress(p) { s.progress = p; schedule(); },
+          unity(status, message) {
+            if (status === "ready") s.ready = ms();
+            else { s.failed = ms(); s.failMsg = String(message); }
+            schedule();
+          }
+        };
+        schedule();
+        return api;
+      })() : null;
+    </script>
+    <script>
+      const canvas = document.getElementById("unity-canvas");
+      const loading = document.getElementById("unity-loading-container");
+      const warning = document.getElementById("unity-warning");
+      const buildUrl = "Build";
+      const config = {
+        arguments: [],
+        dataUrl: buildUrl + "/WebGL.data.unityweb",
+        frameworkUrl: buildUrl + "/WebGL.framework.js.unityweb",
+        codeUrl: buildUrl + "/WebGL.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        fullscreenElementID: "unity-fullscreen-container",
+        companyName: "CCGS Studio",
+        productName: "NeonSlash",
+        productVersion: "1.0",
+        showBanner(message, type) {
+          if (type === "error") {
+            warning.textContent = message;
+            warning.style.display = "block";
+          } else {
+            console.warn(message);
+          }
+        }
+      };
+
+      // 保留原生多指事件給 Unity，取消瀏覽器捲動與相容滑鼠事件。
+      for (const eventName of ["touchstart", "touchmove", "touchend"]) {
+        canvas.addEventListener(eventName, (event) => {
+          if (event.cancelable) event.preventDefault();
+          if (eventName === "touchstart") canvas.focus({ preventScroll: true });
+        }, { passive: false });
+      }
+
+      const mobile = navigator.maxTouchPoints > 0 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      document.getElementById("unity-container").classList.toggle("unity-mobile", mobile);
+      // 手機限制繪圖解析度（T3）：DPR 3 時背後緩衝約 2080×1170，上限 1.5 只剩約四分之一的像素量。
+      // Unity framework 的 _JS_SystemInfo_GetPreferredDevicePixelRatio 讀 Module.devicePixelRatio，config 的屬性會併進 Module。桌機不變。
+      if (mobile) config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+
+      // 直向轉橫向提示（T2）：顯示與否交給 style.css 的 (orientation: portrait) and (pointer: coarse)，
+      // 而且 <html> 沒有 portrait-ok。按「直向繼續玩」後加上 portrait-ok 並記在 sessionStorage，
+      // 同分頁重新載入不再出現；儲存失敗時只記在這次頁面的 class 上。轉成橫向時提示層自然不顯示。
+      // 提示層只是擋住畫面，不會暫停遊戲（模板不知道遊戲狀態；要暫停得由 C# 端處理）。所以 Unity 就緒後只要在橫向碰過畫面，
+      // 這次頁面就加上 portrait-ok（不寫 sessionStorage）：之後中途轉成直向只顯示 #portrait-hint 小字，不再用全畫面蓋住還在跑的遊戲
+      // （2026-10-06 第 2 輪驗證 minor：E3 轉直向後提示層顯示約 2 秒，tick 154 → 276）。重新載入時若是直拿，提示層照樣出現。
+      let unityReady = false;
+      const landscapeQuery = window.matchMedia("(orientation: landscape)");
+      // 非 passive、也不呼叫 preventDefault：S1 要求沒帶 touchdebug 時頁面沒有 passive 捕獲監聽器。
+      window.addEventListener("touchstart", () => {
+        if (unityReady && landscapeQuery.matches) document.documentElement.classList.add("portrait-ok");
+      }, { capture: true, passive: false });
+      const rotateOverlay = document.getElementById("rotate-overlay");
+      const rotateContinue = document.getElementById("rotate-continue");
+      const portraitQuery = window.matchMedia("(orientation: portrait) and (pointer: coarse)");
+      const rotateShown = () => portraitQuery.matches && !document.documentElement.classList.contains("portrait-ok");
+      // 焦點（無障礙）：提示層出現時把焦點移到對話框本身（tabindex=-1，不畫外框），消失時焦點若還在裡面就交回遊戲畫面。
+      // [事實] 2026-10-06 本機實測：DOM 焦點在 canvas 與其他元素之間移動不會觸發 Unity 的 OnApplicationFocus
+      // （它只跟 window 的 blur／focus），所以這裡移動焦點不會讓遊戲失焦暫停或丟輸入。
+      const syncRotateFocus = () => {
+        const inside = rotateOverlay.contains(document.activeElement);
+        if (rotateShown()) {
+          if (!inside) rotateOverlay.focus({ preventScroll: true });
+        } else if (inside) {
+          canvas.focus({ preventScroll: true });
+        }
+      };
+      const dismissRotate = () => {
+        if (document.documentElement.classList.contains("portrait-ok")) return; // click 與 touchend 可能都到，只做一次
+        document.documentElement.classList.add("portrait-ok");
+        try {
+          sessionStorage.setItem(PORTRAIT_OK_KEY, "1");
+        } catch (err) {
+          // 例如隱私模式寫不進去：只記在記憶體（上面已加的 class）。
+        }
+        syncRotateFocus();
+      };
+      rotateContinue.addEventListener("click", dismissRotate); // 滑鼠、鍵盤（Enter／空白鍵）
+      // 觸控另外聽 touchend：另一指還按在提示層上時，Chrome 不把第二指的點按判成 tap，不會產生 click。
+      // 手指在按鈕範圍內放開就關閉，並 preventDefault 取消後續的相容滑鼠事件與 click，
+      // 免得提示層消失後，同一下點按的滑鼠事件落到底下的遊戲畫面。
+      rotateContinue.addEventListener("touchend", (event) => {
+        const r = rotateContinue.getBoundingClientRect();
+        const onButton = [...event.changedTouches].some((t) => t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom);
+        if (!onButton) return; // 手指滑出按鈕才放開＝取消，不關閉
+        if (event.cancelable) event.preventDefault();
+        dismissRotate();
+      });
+      if (portraitQuery.addEventListener) portraitQuery.addEventListener("change", syncRotateFocus);
+      else if (portraitQuery.addListener) portraitQuery.addListener(syncRotateFocus);
+      // 提示層顯示時 Tab 只在對話框內（唯一可聚焦的是按鈕），不會跳到背後的遊戲畫面。
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Tab" && rotateShown()) {
+          event.preventDefault();
+          rotateContinue.focus({ preventScroll: true });
+        }
+      });
+      syncRotateFocus();
+
+      // 黑邊觸控轉送（T1）。
+      // Unity（emscripten）只在 #unity-canvas 上收 touchstart/move/end/cancel，畫面又維持 16:9，
+      // 橫向左右、直向上下都有黑邊，手指落在黑邊原本完全沒反應。這裡把起點不在 canvas 上的觸控
+      // （body、容器、#portrait-hint、黑邊）轉成派到 canvas 上的合成 TouchEvent：每指在 touchstart 時算一次
+      //   offset = 夾進 canvas 矩形（內縮 2 px）的起點 − 實際起點，
+      // 之後該指的 move/end/cancel 都套同一個 offset，保留相對位移（黑邊起手按住拖動也能走位）；
+      // 位移後超出 canvas 是允許的，等同手指從 canvas 邊緣拖出去。
+      // 不轉送：轉橫向提示層、#unity-warning、載入遮罩（Unity ready 前一律不轉送，canvas 上的觸控也照原生路徑）、
+      // 按鈕等可點元素、任何帶 data-no-forward 的元素；這些觸控不呼叫 preventDefault，按鈕的 click 照常發生。
+      // 自己派出的合成事件記在 WeakSet，而且 isTrusted 為 false，監聽器一律略過，不會重複處理。
+      //
+      // 模式：接管（FORWARD_TAKEOVER = true）。在 window 捕獲階段攔下 canvas 上的可信觸控（stopPropagation，
+      // emscripten 收不到原生事件），所有手指一律改派合成事件，canvas 上起手的手指 offset = 0；
+      // 每個合成事件的 touches 都列出全部手指，Unity 看到的是一致的一組觸控。
+      // 為什麼不用「只轉送畫布外」：2026-10-06 本機 CDP 可信觸控實測（tools/webgl-smoke/touch_forward_check.py S6／S6b）
+      //   - 左指從黑邊拖、右指點 canvas：兩種模式走位方向都不跳（原生事件裡左指的原始座標沒被 Unity 採用）；
+      //   - 左指在 canvas 上拖、右指點右黑邊：只轉送畫布外時，右指的合成 touchend（touches 不含 canvas 上的左指）
+      //     一送出，左指的走位就停了（「move 走位停止」出現在左指放開前）；接管模式兩個情境都正常。
+      const FORWARD_TAKEOVER = true;
+      const touchForward = (() => {
+        const EDGE_INSET = 2;
+        let ready = false;
+        let enabled = false;
+        try {
+          if (typeof Touch === "function" && typeof TouchEvent === "function") {
+            const probe = new Touch({ identifier: 0, target: canvas, clientX: 0, clientY: 0 });
+            new TouchEvent("touchstart", { touches: [probe], targetTouches: [probe], changedTouches: [probe] });
+            enabled = true;
+          }
+        } catch (err) {
+          enabled = false;
+        }
+
+        const clampPoint = (x, y) => {
+          const r = canvas.getBoundingClientRect();
+          return {
+            x: Math.min(Math.max(x, r.left + EDGE_INSET), r.right - EDGE_INSET),
+            y: Math.min(Math.max(y, r.top + EDGE_INSET), r.bottom - EDGE_INSET)
+          };
+        };
+        const exclusionReason = (target) => {
+          const el = target && target.nodeType === 1 ? target : (target && target.parentElement) || null;
+          if (!el) return "沒有目標元素";
+          if (el.closest("[data-no-forward]")) return "不轉送元素";
+          if (el.closest("button, a, input, select, textarea, label")) return "可點元素";
+          if (el.closest("#unity-warning")) return "錯誤框";
+          if (el.closest("#unity-loading-container")) return "載入遮罩";
+          return "";
+        };
+        const classify = (t) => {
+          if (t.target === canvas) return { kind: "canvas", reason: enabled && ready && FORWARD_TAKEOVER ? "接管" : "" };
+          if (!enabled) return { kind: "excluded", reason: "轉送停用" };
+          if (!ready) return { kind: "excluded", reason: "Unity 尚未就緒" };
+          const reason = exclusionReason(t.target);
+          if (reason) return { kind: "excluded", reason };
+          return { kind: "forward", reason: "", to: clampPoint(t.clientX, t.clientY) };
+        };
+
+        const api = { classify, setReady() { ready = true; }, mode: FORWARD_TAKEOVER ? "接管模式" : "只轉送畫布外" };
+        if (!enabled) {
+          console.info("[NeonSlash][Touch] 這個瀏覽器無法建構觸控事件，黑邊觸控轉送停用（請直接點遊戲畫面）。");
+          api.mode = "停用（無法建構 Touch）";
+          return api;
+        }
+
+        const TYPES = ["touchstart", "touchmove", "touchend", "touchcancel"];
+        const own = new WeakSet();
+        const fingers = new Map();
+        const remember = (f, t) => {
+          f.clientX = t.clientX; f.clientY = t.clientY;
+          f.screenX = t.screenX; f.screenY = t.screenY;
+          f.pageX = t.pageX; f.pageY = t.pageY;
+          f.radiusX = t.radiusX || 0; f.radiusY = t.radiusY || 0;
+          f.rotationAngle = t.rotationAngle || 0; f.force = t.force || 0;
+          return f;
+        };
+        const makeTouch = (f) => new Touch({
+          identifier: f.id, target: canvas,
+          clientX: f.clientX + f.dx, clientY: f.clientY + f.dy,
+          screenX: f.screenX + f.dx, screenY: f.screenY + f.dy,
+          pageX: f.pageX + f.dx, pageY: f.pageY + f.dy,
+          radiusX: f.radiusX, radiusY: f.radiusY, rotationAngle: f.rotationAngle, force: f.force
+        });
+        // touches／targetTouches＝目前所有轉送中的手指（已位移）；changedTouches＝本次變動的轉送手指。
+        // 只建構、不派送：建構成功才攔原生事件（見下方失效保護）。
+        const build = (type, changedIds) => {
+          const made = new Map();
+          for (const f of fingers.values()) made.set(f.id, makeTouch(f));
+          const ending = type === "touchend" || type === "touchcancel";
+          const active = [...made.values()].filter((t) => !(ending && changedIds.includes(t.identifier)));
+          const changed = changedIds.map((id) => made.get(id)).filter(Boolean);
+          const synthetic = new TouchEvent(type, {
+            bubbles: true, cancelable: true, composed: true, view: window,
+            touches: active, targetTouches: active, changedTouches: changed
+          });
+          own.add(synthetic);
+          return synthetic;
+        };
+        // 失效保護：接管模式下手機上每一下 canvas 觸控都走合成路徑，合成事件一旦建構或派送失敗，
+        // 若原生事件已被攔下，整個遊戲就點不動。所以順序是「先建好合成事件 → 成功才 stopPropagation／preventDefault 並派送」；
+        // 任何一步丟例外就整個停用（移除監聽器），這一下與之後的觸控都照原生路徑給 Unity：
+        // canvas 上照常可玩，只有黑邊恢復成沒反應。console.info 只印一次，不用 console.error。
+        let onTouch = null;
+        const disable = (err) => {
+          if (!enabled) return;
+          enabled = false;
+          for (const type of TYPES) window.removeEventListener(type, onTouch, { capture: true });
+          try {
+            // 盡量讓已轉送的手指在 Unity 端收尾；建構仍然失敗就放棄。
+            if (fingers.size) canvas.dispatchEvent(build("touchcancel", [...fingers.keys()]));
+          } catch (err2) {
+            // 已停用，不再處理。
+          }
+          fingers.clear();
+          api.mode = "停用（合成觸控失敗）";
+          console.info("[NeonSlash][Touch] 合成觸控事件失敗，黑邊轉送已停用、改回原生觸控（請直接點遊戲畫面）："
+            + (err && err.message ? err.message : String(err)));
+        };
+        onTouch = (e) => {
+          if (!enabled || own.has(e) || !e.isTrusted || !ready) return;
+          const out = [];
+          const changed = [];
+          try {
+            // 漏接的手指（不在這次事件的觸控清單裡）當作取消，免得殘留在之後的合成事件裡。
+            const live = new Set();
+            for (const t of e.touches) live.add(t.identifier);
+            for (const t of e.changedTouches) live.add(t.identifier);
+            const stale = [...fingers.keys()].filter((id) => !live.has(id));
+            if (stale.length) {
+              out.push(build("touchcancel", stale));
+              for (const id of stale) fingers.delete(id);
+            }
+            if (e.type === "touchstart") {
+              for (const t of e.changedTouches) {
+                if (fingers.has(t.identifier)) continue;
+                const c = classify(t);
+                if (c.kind === "forward") fingers.set(t.identifier, remember({ id: t.identifier, dx: c.to.x - t.clientX, dy: c.to.y - t.clientY }, t));
+                else if (c.kind === "canvas" && FORWARD_TAKEOVER) fingers.set(t.identifier, remember({ id: t.identifier, dx: 0, dy: 0 }, t));
+              }
+            }
+            for (const t of e.changedTouches) {
+              const f = fingers.get(t.identifier);
+              if (f) { remember(f, t); changed.push(t.identifier); }
+            }
+            if (changed.length) out.push(build(e.type, changed));
+          } catch (err) {
+            disable(err);
+            return; // 原生事件照常往下傳給 emscripten
+          }
+          if (changed.length) {
+            if (FORWARD_TAKEOVER && e.target === canvas) e.stopPropagation(); // 不讓 emscripten 收到原生事件，改收合成事件。
+            if (e.cancelable) e.preventDefault(); // 黑邊上也不捲動、不縮放、不產生相容滑鼠事件。
+          }
+          try {
+            for (const synthetic of out) canvas.dispatchEvent(synthetic);
+          } catch (err) {
+            disable(err);
+          }
+          if (e.type === "touchend" || e.type === "touchcancel") for (const id of changed) fingers.delete(id);
+        };
+        for (const type of TYPES) window.addEventListener(type, onTouch, { capture: true, passive: false });
+        return api;
+      })();
+      if (touchDebug) {
+        touchDebug.hooks.classify = touchForward.classify;
+        touchDebug.setInfo({ productVersion: config.productVersion, dpr: config.devicePixelRatio || window.devicePixelRatio || 1, forward: () => touchForward.mode });
+      }
+
+      const script = document.createElement("script");
+      script.src = buildUrl + "/WebGL.loader.js";
+      script.onload = () => {
+        if (touchDebug) touchDebug.loader("loaded");
+        createUnityInstance(canvas, config, (progress) => {
+          document.getElementById("unity-progress-bar-full").style.width = (progress * 100) + "%";
+          if (touchDebug) touchDebug.progress(progress);
+        }).then((unityInstance) => {
+          loading.style.display = "none";
+          document.getElementById("unity-fullscreen-button").onclick = () => unityInstance.SetFullscreen(1);
+          touchForward.setReady();
+          unityReady = true;
+          if (touchDebug) touchDebug.unity("ready");
+        }).catch((message) => {
+          warning.textContent = "遊戲載入失敗：" + message;
+          warning.style.display = "block";
+          if (touchDebug) touchDebug.unity("failed", message);
+        });
+      };
+      script.onerror = () => {
+        warning.textContent = "遊戲載入失敗，請重新整理頁面。";
+        warning.style.display = "block";
+        if (touchDebug) touchDebug.loader("failed");
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>

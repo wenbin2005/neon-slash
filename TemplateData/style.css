@@ -1,0 +1,128 @@
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; background: #070a12; color: #d9edf6; font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
+body { display: grid; place-items: center; }
+#unity-container { width: min(100vw, calc((100dvh - 38px) * 16 / 9)); }
+#unity-container.unity-mobile { width: min(100vw, calc(100dvh * 16 / 9)); }
+#unity-fullscreen-container { position: relative; width: 100%; aspect-ratio: 16 / 9; }
+#unity-fullscreen-container:fullscreen { width: min(100vw, calc(100dvh * 16 / 9)); height: auto; margin: auto; }
+#unity-canvas { width: 100%; height: 100%; display: block; background: #070a12; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; outline: none; }
+#unity-loading-container { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; background: #070a12; }
+#unity-progress-bar-empty { width: min(240px, 70%); height: 5px; background: #193143; border-radius: 5px; overflow: hidden; }
+#unity-progress-bar-full { width: 0; height: 100%; background: #51dbe3; box-shadow: 0 0 14px #51dbe3; }
+#unity-warning { display: none; position: absolute; inset: 10%; padding: 18px; background: #321b2c; color: #fbe7ee; white-space: pre-wrap; overflow-wrap: anywhere; }
+#unity-footer { display: flex; align-items: center; justify-content: space-between; height: 38px; font-size: 14px; }
+.unity-mobile #unity-footer { display: none; }
+#unity-fullscreen-button { border: 1px solid #386979; border-radius: 5px; color: inherit; background: #10222d; padding: 4px 12px; cursor: pointer; }
+#portrait-hint { display: none; position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; right: 16px; text-align: center; font-size: 15px; line-height: 1.7; }
+@media (orientation: portrait) and (pointer: coarse) { #portrait-hint { display: block; } }
+
+/* 黑邊觸控轉送（index.html T1）：整頁不做捲動與縮放手勢，點黑邊也不閃點擊高亮；轉送本身在 index.html。 */
+html, body { touch-action: none; -webkit-tap-highlight-color: transparent; }
+
+/* 直向轉橫向提示層（index.html T2）：只在直向且主要指標是手指、本分頁沒按過「直向繼續玩」時顯示。 */
+:root {
+  --rotate-bg: #070a12;
+  --rotate-accent: #51dbe3;
+  --rotate-title: #f0fbfd;
+  --rotate-text: #b4cfd8;
+  --rotate-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  box-sizing: border-box;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  background:
+    radial-gradient(110% 60% at 50% -8%, rgba(81, 219, 227, 0.2), transparent 62%),
+    radial-gradient(90% 50% at 50% 108%, rgba(255, 92, 168, 0.1), transparent 70%),
+    var(--rotate-bg);
+  color: var(--rotate-title);
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#rotate-overlay:focus { outline: none; } /* 程式把焦點移到對話框本身（tabindex=-1），不畫外框；按鈕仍有 :focus-visible 外框 */
+#rotate-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(81, 219, 227, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(81, 219, 227, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(80% 60% at 50% 42%, #000 30%, transparent 85%);
+  mask-image: radial-gradient(80% 60% at 50% 42%, #000 30%, transparent 85%);
+}
+.rotate-panel {
+  position: relative;
+  box-sizing: border-box;
+  width: min(100%, 340px);
+  padding: 30px 24px 24px;
+  border-radius: 24px;
+  text-align: center;
+  background: linear-gradient(165deg, rgba(26, 52, 66, 0.72), rgba(10, 20, 31, 0.88));
+  border: 1px solid rgba(81, 219, 227, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 22px 60px rgba(0, 0, 0, 0.55), 0 0 56px rgba(81, 219, 227, 0.12);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  animation: rotate-panel-in 520ms var(--rotate-ease) both;
+}
+.rotate-icon { display: block; width: 112px; height: 112px; margin: 0 auto 14px; overflow: visible; filter: drop-shadow(0 0 10px rgba(81, 219, 227, 0.45)); }
+.rotate-phone { transform-box: fill-box; transform-origin: 50% 50%; animation: rotate-phone 2.8s cubic-bezier(0.65, 0, 0.35, 1) infinite; }
+.rotate-arc { opacity: 0.6; animation: rotate-arc 2.8s ease-in-out infinite; }
+#rotate-title { margin: 0 0 10px; font-size: 22px; line-height: 1.35; font-weight: 700; letter-spacing: 0.04em; color: var(--rotate-title); text-shadow: 0 0 18px rgba(81, 219, 227, 0.35); }
+#rotate-desc { margin: 0 0 22px; font-size: 15px; line-height: 1.75; color: var(--rotate-text); }
+#rotate-desc span { display: inline-block; } /* 只在片語之間換行，不把「點擊」拆成兩行 */
+#rotate-continue {
+  min-height: 48px;
+  min-width: 168px;
+  padding: 0 28px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #04141b;
+  background: linear-gradient(180deg, #7deaef 0%, #48cbd4 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 26px rgba(81, 219, 227, 0.32);
+  transition: transform 160ms var(--rotate-ease), box-shadow 160ms ease;
+}
+#rotate-continue:active { transform: scale(0.96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 14px rgba(81, 219, 227, 0.28); }
+#rotate-continue:focus-visible { outline: 2px solid var(--rotate-title); outline-offset: 3px; }
+@media (hover: hover) { #rotate-continue:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 12px 32px rgba(81, 219, 227, 0.46); } }
+@keyframes rotate-panel-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes rotate-phone { 0%, 16% { transform: rotate(0deg); } 46%, 72% { transform: rotate(-90deg); } 94%, 100% { transform: rotate(0deg); } }
+@keyframes rotate-arc { 0%, 16% { opacity: 0.25; } 40% { opacity: 0.9; } 72%, 100% { opacity: 0.25; } }
+@media (orientation: portrait) and (pointer: coarse) {
+  html:not(.portrait-ok) #rotate-overlay { display: grid; }
+  html:not(.portrait-ok) #portrait-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rotate-panel, .rotate-phone, .rotate-arc { animation: none; }
+}
+
+/* ?touchdebug=1 診斷層（index.html T5）：不帶參數時頁面上沒有這些元素，規則不會生效。 */
+#td-root, #td-root * { pointer-events: none !important; -webkit-user-select: none !important; user-select: none !important; }
+#td-root { position: fixed; inset: 0; z-index: 2147483647; contain: strict; overflow: hidden; }
+#td-frame { position: absolute; left: 0; top: 0; box-sizing: border-box; border: 1px dashed rgba(81, 219, 227, 0.85); }
+#td-panel { position: absolute; left: 0; right: 0; top: 0; box-sizing: border-box; overflow: hidden; padding: max(4px, env(safe-area-inset-top)) 8px 4px; background: rgba(0, 0, 0, 0.55); color: #e9f6fa; font: 10.5px/1.4 ui-monospace, Consolas, "Microsoft JhengHei", monospace; }
+/* 橫向只有上緣 35% 可用：三欄並排（摘要｜錯誤＋事件｜QA 行），字小一號；事件、QA、錯誤一筆一行、超出以刪節號截斷，
+   新的在上，空間不夠時被裁掉的是最舊的幾筆。QA 行獨占一欄，不會被事件列擠出畫面。 */
+#td-panel.td-landscape { max-height: 35vh; max-height: 35dvh; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "sum err qa" "sum ev qa"; grid-template-rows: auto 1fr; column-gap: 10px; align-content: start; font-size: 9.5px; line-height: 1.3; }
+#td-panel.td-landscape #td-sum { grid-area: sum; }
+#td-panel.td-landscape #td-err { grid-area: err; }
+#td-panel.td-landscape #td-ev { grid-area: ev; }
+#td-panel.td-landscape #td-qa { grid-area: qa; }
+#td-panel.td-landscape #td-err, #td-panel.td-landscape #td-ev, #td-panel.td-landscape #td-qa { white-space: pre; overflow: hidden; text-overflow: ellipsis; min-height: 0; }
+#td-panel pre { margin: 0 0 3px; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+#td-panel pre:empty { display: none; }
+#td-qa { color: #a8f2d6; }
+#td-err { color: #ffa3b8; }
+.td-dot { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; border: 2px solid; border-radius: 50%; animation: td-fade 600ms ease-out forwards; }
+.td-canvas { border-color: #3ee07a; background: rgba(62, 224, 122, 0.25); }
+.td-forward { border-color: #4aa8ff; background: rgba(74, 168, 255, 0.25); }
+.td-excluded { border-color: #ff4d6d; background: rgba(255, 77, 109, 0.25); }
+@keyframes td-fade { from { opacity: 1; } to { opacity: 0; } }
