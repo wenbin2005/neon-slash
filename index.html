@@ -3,10 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>NeonSlash</title>
+    <title>霓光連斬 NEON SLASH</title>
+    <meta name="description" content="霓虹風格的俯視角動作小遊戲：瞄準、衝刺，一刀貫穿整排敵人；接上連斬進入超載，刷新最高分。支援電腦鍵盤滑鼠、手把與手機瀏覽器，不用安裝。">
+    <meta name="theme-color" content="#070a12">
+    <meta name="color-scheme" content="dark">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="霓光連斬 NEON SLASH">
+    <meta property="og:description" content="瞄準、衝刺、一刀貫穿整排霓虹敵人，連斬到超載、刷新最高分。電腦與手機瀏覽器都能玩。">
+    <meta property="og:url" content="https://wenbin2005.github.io/neon-slash/">
+    <meta property="og:locale" content="zh_TW">
     <!-- 內嵌圖示：瀏覽器不再向站台根目錄要 /favicon.ico（原本每次載入都 404）。 -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a12'/%3E%3Cpath%20d='M9.5%2023.5%2022.5%208.5'%20stroke='%2351dbe3'%20stroke-width='4'%20stroke-linecap='round'/%3E%3Cpath%20d='M7%2015.5h7'%20stroke='%2351dbe3'%20stroke-opacity='.45'%20stroke-width='2'%20stroke-linecap='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="TemplateData/style.css">
+    <noscript><style>#unity-loading-container { display: none; }</style></noscript>
     <script>
       // 直向提示：本分頁按過「直向繼續玩」就在第一次繪製前加上 portrait-ok，提示層不會閃一下。
       const PORTRAIT_OK_KEY = "neonslash.portraitContinue";
@@ -16,16 +25,33 @@
         // 讀不到 sessionStorage（隱私模式或停用網站資料）：照常顯示提示層。
       }
     </script>
+    <script>
+      // 鍵盤焦點外框（WCAG 2.4.7）：只在「用 Tab 鍵把焦點移到頁面上的控制項」之後，<html> 才帶 kb-nav，style.css 用它畫 canvas 的外框。
+      // 滑鼠、觸控、程式呼叫的 focus 與遊戲內按鍵都不會觸發：Unity 就緒後會吃掉 Tab 的預設行為，沒有焦點移動就沒有 focusin，畫面邊緣不會多一圈框。
+      // 只掛捕獲階段的被動監聽器，不呼叫 preventDefault／stopPropagation，不影響既有的輸入與觸控轉送。
+      (function () {
+        const root = document.documentElement;
+        let tabbing = false;
+        window.addEventListener("keydown", (event) => { tabbing = event.key === "Tab"; }, { capture: true, passive: true });
+        window.addEventListener("keyup", () => { tabbing = false; }, { capture: true, passive: true });
+        document.addEventListener("focusin", () => { if (tabbing) root.classList.add("kb-nav"); }, { capture: true, passive: true });
+        for (const type of ["pointerdown", "mousedown", "touchstart"]) {
+          window.addEventListener(type, () => { tabbing = false; root.classList.remove("kb-nav"); }, { capture: true, passive: true });
+        }
+      })();
+    </script>
   </head>
   <body>
-    <p id="portrait-hint">橫向遊玩更清楚 · 左側拖動走位，右側點擊衝刺斬擊</p>
+    <p id="portrait-hint" role="complementary" aria-label="手機操作提示">橫向遊玩更清楚 · 左側拖動走位，右側點擊衝刺斬擊</p>
     <main id="unity-container">
+      <h1 class="visually-hidden">霓光連斬 NEON SLASH</h1>
       <div id="unity-fullscreen-container">
         <canvas id="unity-canvas" width="1280" height="720" tabindex="0" aria-label="霓光連斬遊戲"></canvas>
         <div id="unity-loading-container" role="status">
           <p>載入霓光連斬…</p>
-          <div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div>
+          <div id="unity-progress-bar-empty" role="progressbar" aria-label="載入進度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="unity-progress-bar-full"></div></div>
         </div>
+        <noscript>此遊戲需要啟用 JavaScript 才能執行。</noscript>
         <div id="unity-warning" role="alert"></div>
       </div>
       <div id="unity-footer"><span>NeonSlash</span><button id="unity-fullscreen-button" type="button">全螢幕</button></div>
@@ -57,6 +83,22 @@
         <button id="rotate-continue" type="button">直向繼續玩</button>
       </div>
     </div>
+    <script>
+      // 載入進度的無障礙與提示：只觀察進度條的 style，不碰 createUnityInstance 的進度回呼。
+      // aria-valuenow 跟著進度；到 90% 之後（檔案下載完、wasm 編譯與啟動這段，慢裝置上要好幾秒）把文字換成「正在啟動遊戲…」，免得畫面看起來卡住。
+      (function () {
+        const full = document.getElementById("unity-progress-bar-full");
+        const bar = document.getElementById("unity-progress-bar-empty");
+        const label = document.querySelector("#unity-loading-container p");
+        if (!full || !bar || !label) return;
+        const STARTING_TEXT = "正在啟動遊戲…";
+        new MutationObserver(() => {
+          const percent = Math.round(parseFloat(full.style.width) || 0);
+          bar.setAttribute("aria-valuenow", String(percent));
+          if (percent >= 90 && label.textContent !== STARTING_TEXT) label.textContent = STARTING_TEXT;
+        }).observe(full, { attributes: true, attributeFilter: ["style"] });
+      })();
+    </script>
     <script>
       // ?touchdebug=1 診斷模式（T5）。網址沒帶這個參數時，這段只做一次網址比對：
       // 不建立任何 DOM、不掛任何監聽器、不包裝 console，頁面行為和沒有這段時完全相同。

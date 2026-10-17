@@ -15,6 +15,13 @@ body { display: grid; place-items: center; }
 #portrait-hint { display: none; position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; right: 16px; text-align: center; font-size: 15px; line-height: 1.7; }
 @media (orientation: portrait) and (pointer: coarse) { #portrait-hint { display: block; } }
 
+/* 只給螢幕閱讀器看的文字（頁面標題 h1）。 */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* 鍵盤焦點外框（WCAG 2.4.7）：只在用 Tab 把焦點移到 canvas 時顯示；kb-nav 由 index.html 的小腳本管理，滑鼠、觸控與遊戲內按鍵不會觸發。 */
+html.kb-nav #unity-canvas:focus { outline: 2px solid #51dbe3; outline-offset: -2px; }
+/* 沒有 JavaScript 時的提示（永遠不會前進的載入畫面已由 index.html 的 noscript 樣式隱藏）。 */
+#unity-fullscreen-container > noscript { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 16px; text-align: center; }
+
 /* 黑邊觸控轉送（index.html T1）：整頁不做捲動與縮放手勢，點黑邊也不閃點擊高亮；轉送本身在 index.html。 */
 html, body { touch-action: none; -webkit-tap-highlight-color: transparent; }
 
